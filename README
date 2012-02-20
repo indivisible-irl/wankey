@@ -1,0 +1,21 @@
+// wankey-stats
+// A Wankey (and other gmail thread) stats program (python)
+// Created: 2012/02/18
+// Last modified: 2012/02/20
+
+A program to answer once and for all how many wankeys are there.
+
+It will gather information about your gmail email history and calculate some statistics as well as totals.
+
+While your emails obviously have to be looked at by the program to gather the required info, none of it is transmitted to me or anywhere else. It is your choice what you want to do with the outputed stats.
+
+Lui has offered to create some sort of infographic.
+
+Anyway... enjoy,
+Dave A/B, indivisible, MbS
+
+
+// If you'd like to test this out for yourself you will need to configure some options at the top of "wankey-stats_v*.py" while it is still an alpha stage program.
+// You will also need a python interpreter: http://python.org/getit/
+
+Disclaimer: This is an initial partially working version. it doen't look pretty and make fail in some cases. If you want to help me improve it either email me the issues or sign up here.
