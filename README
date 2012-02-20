@@ -25,7 +25,7 @@ Dave A/B, indivisible, MbS
 //		Begin
 
 
-Disclaimer: This is an initial partially working version. it doen't look pretty and may fail in some cases. If you want to help me improve it either email me the issues or sign up here.
+Disclaimer: This is an initial partially working version. it doesn't look pretty and may fail in some cases. If you want to help me improve it either email me the issues or sign up here.
 
 If you'd like to test this out for yourself you will need to configure some options at the top of "wankey-stats_v*.py" while it is still an alpha stage program.
 You will also need a python interpreter: http://python.org/getit/
