@@ -15,13 +15,14 @@ Anyway... enjoy,
 Dave A/B, indivisible, MbS
 
 // Changelog:
-2012/02/20 - 0.1.1:
-	Added email/password handling
-2012/02/20 - 0.1.0:
-	Many tweaks
-	First github upload
-2012/02/18 - 0.0.1:
-	Begin
+//
+// 2012/02/20 - 0.1.1:
+//		Added email/password handling
+// 2012/02/20 - 0.1.0:
+//		Many tweaks
+//		First github upload
+// 2012/02/18 - 0.0.1:
+//		Begin
 
 
 Disclaimer: This is an initial partially working version. it doen't look pretty and may fail in some cases. If you want to help me improve it either email me the issues or sign up here.
