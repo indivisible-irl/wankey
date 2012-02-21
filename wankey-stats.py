@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 
-
 """wankey-stat.py: Program to get stats from gmail activity
 
 Being written with the aim of answering that age old question:
@@ -10,26 +9,27 @@ Will eventually collect stats and output a nice condensed summery of activity.""
 
 import imaplib
 import os
+import cPickle
 from email.parser import HeaderParser
 
 ####################
-#   Customise here before running
+#   Customise run options here
 
 debug = False       # Set to display debug info.
 output = False      # Toggle printing output as it walks the chosen label.
-save = False         # Toggle building dict of repeating info.
+save = True         # Toggle building dict of repeating info.
 disp_count = False  # Toggle count of msgs on label list. (slower)
-ask_label = False    # Toggle asking for a label or default to one. (set below)
-delve = False       # Toggle displaying of label stats.
-look = False         # Toggle parsing email stream for chosen label.
-info = False         # Toggle displaying dict info at end. ('save' must be "True" above)
-limit = False       # Toggle to enable stopping after a set amount of emails. (set below)
+ask_label = True    # Toggle asking for a label or default to one. (set below)
+delve = True       # Toggle displaying of label stats.
+look = True         # Toggle parsing email stream for chosen label.
+info = True         # Toggle displaying dict info at end. ('save' must be "True" above)
+limit = True       # Toggle to enable stopping after a set amount of emails. (set below)
 
 #   Set your default label here "parent/child", case sensitive.
-#   If you want a system label (All, sent etc) use "[Gmail]/child"
+#   If you want a system label (All, sent etc) use "[Gmail]/child" format incl. brackets
 default_label = '[Gmail]/Starred'
 #   Set maximum emails to parse at a time. Limit for testing purposes.
-max_limit = 25
+max_limit = 80
 
 #   Global vars:
 email = ''
@@ -40,11 +40,14 @@ password = ''
 #   TODO:
 ####################
 
-# - ask for email and password at runtime. Do when out of alpha.             0%
-# - parse subjects in label and count unique threads (-Re: Re: Fw:)       50%
-# - display top thread counts (5+?)                                       0%
-# - parse ALL mail and gather thread counts (in case of lazy labels)      20%
-# - write a nav system for labels. with children, without, is parent etc  60%
+# - ask for email and password at runtime.                                  75%
+# - parse subjects in label and count unique threads (-Re: Re: Fw:)         50%
+# - display top thread counts (5+?)                                         0%
+# - parse ALL mail and gather thread counts (in case of lazy labels)        20%
+# - write a nav system for labels. with children, without, is parent etc    60%
+# - allow choosing multiple labels and multiple threads                     5%
+# - proper error handling                                                   0%
+# - forget whole email data and just get sub, to, from, cc, date etc.       0%
 
 
 ####################
@@ -52,7 +55,7 @@ password = ''
 ####################
 
 class pygmail:
-    
+    """Class to contain imap related functionality and email info"""
     def __init__(self):
         """Initialise various variables."""
         if debug: print 'init...'
@@ -61,17 +64,19 @@ class pygmail:
         self.M = None
         self.response = None
 
-        self.labels = []
+        self.all_labels = []
         self.label = ''
         self.to = []
         self.cc = []
         self.sys = []
         self.emails = []
 
-        self.info = {}
+        self.info = {}      # dict to hold the collected info
         self.info['email_sub'] = {}
         self.info['email_from'] = {}
         self.info['email_to'] = {}
+        self.info['starred'] = {}
+        self.info['used_labels'] = []
 
     def login(self, username, password):
         """Create connection and login."""
@@ -80,7 +85,7 @@ class pygmail:
         self.M = imaplib.IMAP4_SSL(self.IMAP_SERVER, self.IMAP_PORT)
         try:
             rc, self.response = self.M.login(username, password)
-            print 'Logon rc:', rc
+            if debug: print 'Logon rc:', rc
             return rc
         except:
             print 'Unable to login. Please check your address and password and try again.'
@@ -93,8 +98,7 @@ class pygmail:
 
     def get_all_labels(self):
         """Gather listing of labels
-
-            Return status, append sys and labels lists"""
+        Return status, append sys and labels lists"""
         rc, self.response = self.M.list()
         i = 1
         for item in self.response:
@@ -106,23 +110,23 @@ class pygmail:
                 i += 1
                 continue
             if debug: print i, '--- not sys:', item
-            self.labels.append(self.label)
+            self.all_labels.append(self.label)
             i += 1
-        self.labels.sort()
+        self.all_labels.sort()
         self.sys.sort()
         for item in self.sys:
-            self.labels.append(item) # append system labels to the end of 'self.labels'
+            self.all_labels.append(item) # append system labels to the end of 'self.all_labels'
         return rc
 
     def disp_all_labels(self):
         """Display all parent and child labels with an index."""
-        if self.labels == []:
+        if self.all_labels == []:
             print 'No labels collected yet, please run self.get_labels() first.'
             return -1
         i = 0
         print 'Num | Label (children indented)'.ljust(33), '| Email count'
         print '-'*50
-        for item in c.labels:
+        for item in c.all_labels:
             i += 1
             tmp = str(i).zfill(2)
             try:
@@ -169,10 +173,10 @@ class pygmail:
         else:
             print '\nThere are', response, 'email(s) in', self.label + ':'
             ### various 'status' returns for self.label:
-            print '\t', c.get_status_messages()
-            print '\t', c.get_status_recent()
-            print '\t', c.get_status_uidnext()
-            print '\t', c.get_status_uidval()
+            #print '\t', c.get_status_messages()
+            #print '\t', c.get_status_recent()
+            #print '\t', c.get_status_uidnext()
+            #print '\t', c.get_status_uidval()
             print '\t', c.get_status_unread()
 
 
@@ -182,7 +186,7 @@ class pygmail:
 
     def select_label(self):
         """Command line label select.
-            Use only AFTER self.get_all_labels() and self.disp_all_labels()"""
+        Use only AFTER self.get_all_labels() and self.disp_all_labels()"""
         run = True
         while run:
             label_num = raw_input('\nPlease enter a label number to analyse:')
@@ -192,10 +196,10 @@ class pygmail:
                 run = False
             else:
                 try:
-                    self.set_label(c.labels[int(label_num)-1])
+                    self.set_label(c.all_labels[int(label_num)-1])
                     run = False
                 except:
-                    print 'Not a valid entry!\nPlease enter a number between 1 and', len(self.labels), 'only.'
+                    print 'Not a valid entry!\nPlease enter a number between 1 and', len(self.all_labels), 'only.'
         print '\nYou selected:', label_num, ': "' + self.label + '"'
 
     def add_info(self, e_sub, e_from, e_to):
@@ -204,28 +208,26 @@ class pygmail:
             self.info['email_sub'][e_sub] += 1
         else:
             self.info['email_sub'][e_sub] = 1
-            
+
         if e_from in self.info['email_from']:
             self.info['email_from'][e_from] += 1
         else:
             self.info['email_from'][e_from] = 1
-            
+
         if e_to in self.info['email_to']:
             self.info['email_to'][e_to] += 1
         else:
             self.info['email_to'][e_to] = 1
-        
 
     def parse_emails(self):
         """Walk through emails within selected label."""
-        
+
         self.M.select(self.label)
         typ, data = self.M.search(None, 'ALL')
         i = 1
         total = self.get_count()
         for num in data[0].split():
             print '\nFetching', str(i).zfill(3), 'of', total
-            print 'Done:', get_percentage(i, total)
             resp, data = self.M.FETCH(num, '(RFC822)')
             msg = HeaderParser().parsestr(data[0][1])
             if True:  # Filter here by subject if wanted
@@ -242,24 +244,59 @@ class pygmail:
                         print '\t', email
                     print '\n\n'
                 if save:
-                    print msg['Subject']
+                    print 'Subject:\t', msg['Subject']
                     self.add_info(remove_re(msg['Subject']), extract_email(msg['From']), extract_email(msg['To']))
-
+            print 'Done:', get_percentage(i, total)
             i += 1
             if limit:
                 if i > max_limit:
                     print 'Reached "max_limit". Ending c.parse_emails()'
                     break
 
+    def parse_starred_wankey(self):
+        """Collect the authors of starred emails in wankey only"""
+        subject_only = 'Christmas Day *generic e-mail wankey*'
+        self.M.select('[Gmail]/Starred')
+        typ, data = self.M.search(None, 'ALL')
+        i = 1
+        total = self.get_count()
+        for num in data[0].split():
+            print '\nFetching', str(i).zfill(3), 'of', total
+            print 'Done:', get_percentage(i, total)
+            resp, data = self.M.FETCH(num, '(RFC822)')
+            msg = HeaderParser().parsestr(data[0][1])
+            tmp = remove_re(msg['Subject'])
+            if tmp == subject_only:
+                print 'FOUND ONE!!!'
+                if tmp in self.info['starred']:
+                    self.info['starred'][tmp] += 1
+                else:
+                    self.info['starred'][tmp] = 1
+            if limit:
+                if i > max_limit:
+                    print 'reached limit of', max_limit
+                    break
+            i +=1
+
     def disp_info(self):
         """Print out the contents of the info dictionary"""
         if self.info['email_sub'] != {}:
             for field in self.info:
                 print 'Field:', field
+                if field == 'used_labels':
+                    print 'Skipping used_labels [list]'
+                    continue
                 for entry in self.info[field]:
                     print '\tEntry:', str(self.info[field][entry]).zfill(3), entry
         else:
             print 'Dictionary is empty. Please run c.parse_emails() first'
+
+    def dump_info(self):
+        if self.info['email_sub'] != {}:
+            f_out = open('./info.dat', 'w')
+            cPickle.dump(self.info, f_out)
+            print '\n...Info dumped!'
+
 
 ####################
 #   Functions:
@@ -267,7 +304,7 @@ class pygmail:
 
 def ask_details():
     """Ask for user logon details, look in file or offer to change"""
-    location = './account'
+    location = './account.dat'
     run = True
     while run:
         try:
@@ -288,7 +325,7 @@ def ask_details():
             tmp = s.split(':', 1)
             file_email = tmp[0]
             file_password = tmp[1]
-            response = raw_input('Setting found for "' + file_email + "\n Reconnect? (y/n)")
+            response = raw_input('Settings found for "' + file_email + '"\n\tReconnect?  (y/n):')
             while response != 'y' and response != 'n':
                 print 'r: "' + str(response) + '"'
                 response = raw_input('Please enter either "y" or "n":')
@@ -296,17 +333,15 @@ def ask_details():
                 print 'OK, removing settings for', file_email, '...\n'
                 os.remove(location)
             if response == 'y':
-                print 'OK, reconnecting to', file_email, '...\n'
+                print 'OK. Reconnecting to', file_email, '...\n'
                 run = False
     return file_email, file_password
 
-    
 
 def remove_re(sub):
     """Tidy up the email subject.
-
     TODO: include 'Fw:' to find
-    TODO: make this a while loop"""
+    TODO: make all this a while loop"""
     if sub.rfind('Re:') != -1:
         tmp = sub[sub.rfind('Re:')+3:].strip()
         while tmp.startswith('Re :'):
@@ -347,37 +382,41 @@ def get_percentage(now, total):
 #   Main:
 ####################
 
-### Ask user for account details if not saved in file
+#   Ask user for account details if not saved in file
 email, password = ask_details()
 
-### Initialise class and logon
+#   Initialise class and logon
 c = pygmail()
 c.login(email, password)
 
-### Gather labels then print them out with index
+#   Gather labels then print them out with index
 c.get_all_labels()
 c.disp_all_labels()
 
-### Ask for a label
+#   Ask for a label
 if ask_label:
     c.select_label()
 else:
     c.label = default_label
 
-### Look into a label (readonly)
+#   Test starred:
+#c.parse_starred_wankey()
+
+#   Look into a label (readonly)
 if delve:
     c.disp_full_info()
 
-### Parse emails
+#   Parse emails
 if look:
     c.parse_emails()
 
-### Display collected info
+#   Display collected info
 if save:
     if info:
         c.disp_info()
+        c.dump_info()
 
-### Logout
+#   Logout
 c.logout()
 
 
@@ -385,6 +424,6 @@ __author__      = "Dave A, aka indivisible, aka mbs-irl"
 __email__       = "mbspare@gmail.com"
 __copyright__   = "Copyright 2012, indivisible"
 __license__     = "GPL"
-__version__     = "0.1.1"
-__date__        = "20/02/2012"
+__version__     = "0.1.2"
+__date__        = "21/02/2012"
 __status__      = "Prototype"

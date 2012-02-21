@@ -16,6 +16,9 @@ Dave A/B, indivisible, MbS
 
 // Changelog:
 //
+// 2012/02/21 - 0.1.1:
+//		Small tidying
+//		Created "wankey-dict.py" for offline testing
 // 2012/02/20 - 0.1.1:
 //		Added email/password handling
 // 2012/02/20 - 0.1.0:
