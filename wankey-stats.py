@@ -10,20 +10,24 @@ Will eventually collect stats and output a nice condensed summery of activity.""
 import imaplib
 import os
 import cPickle
+import time
+from types import *
 from email.parser import HeaderParser
 
-####################
-#   Customise run options here
+#####################
+#   Customise run:
+#####################
 
 debug = False       # Set to display debug info.
 output = False      # Toggle printing output as it walks the chosen label.
 save = True         # Toggle building dict of repeating info.
 disp_count = False  # Toggle count of msgs on label list. (slower)
 ask_label = True    # Toggle asking for a label or default to one. (set below)
-delve = True       # Toggle displaying of label stats.
+delve = False       # Toggle displaying of label stats.
 look = True         # Toggle parsing email stream for chosen label.
 info = True         # Toggle displaying dict info at end. ('save' must be "True" above)
 limit = True       # Toggle to enable stopping after a set amount of emails. (set below)
+autoreconn = True  # Reconnect to saved account info automatically
 
 #   Set your default label here "parent/child", case sensitive.
 #   If you want a system label (All, sent etc) use "[Gmail]/child" format incl. brackets
@@ -34,7 +38,6 @@ max_limit = 80
 #   Global vars:
 email = ''
 password = ''
-
 
 ####################
 #   TODO:
@@ -75,7 +78,8 @@ class pygmail:
         self.info['email_sub'] = {}
         self.info['email_from'] = {}
         self.info['email_to'] = {}
-        self.info['starred'] = {}
+        self.info['email_cc'] = {}
+        self.info['email_star'] = {}
         self.info['used_labels'] = []
 
     def login(self, username, password):
@@ -102,7 +106,6 @@ class pygmail:
         rc, self.response = self.M.list()
         i = 1
         for item in self.response:
-
             self.label = item.split('"')[-2]
             if self.label.startswith('[Gmail]'):
                 if debug: print i, '--- is  sys:', item
@@ -179,7 +182,6 @@ class pygmail:
             #print '\t', c.get_status_uidval()
             print '\t', c.get_status_unread()
 
-
     def set_label(self, label):
         """Set the current label."""
         self.label = label
@@ -189,7 +191,7 @@ class pygmail:
         Use only AFTER self.get_all_labels() and self.disp_all_labels()"""
         run = True
         while run:
-            label_num = raw_input('\nPlease enter a label number to analyse:')
+            label_num = raw_input('\nPlease enter a label number to analyse: ')
             if str(label_num) == '':
                 self.set_label('[Gmail]/All Mail')
                 print "You didn't enter a choice so we've defaulted to 'All Mail'"
@@ -202,7 +204,36 @@ class pygmail:
                     print 'Not a valid entry!\nPlease enter a number between 1 and', len(self.all_labels), 'only.'
         print '\nYou selected:', label_num, ': "' + self.label + '"'
 
-    def add_info(self, e_sub, e_from, e_to):
+    def gather_info(self):
+        """Walk through emails within selected label and collect info."""
+        self.M.select(self.label)
+        rc, data = self.M.search(None, 'ALL')
+        i = 1
+        total = self.get_count()
+        for uid in data[0].split():
+            resp, header = self.M.FETCH(uid, '(BODY[HEADER])')
+            if debug: print 'header_data:\n', header
+            msg = HeaderParser().parsestr(header[0][1])
+            e_sub = remove_re(msg['Subject'])
+            e_from = extract_email(msg['From'])
+            e_to = extract_email(msg['To'])
+            e_cc = extract_emails(msg['CC'])
+            #e_cc = extract_emails(msg['CC']
+            #e_date = date_to_epoch(msg['Date'])
+            self.add_info(e_sub, e_from, e_to, e_cc)
+            #print 'Sub:', e_sub
+            #print 'Frm:', e_from
+            #print 'To: ', e_to
+            #print 'CC: ', e_cc
+            #print 'Dte:', e_date
+            print '\n'
+            i += 1
+            if limit:
+                if i > max_limit:
+                    print 'Reached "max_limit". Ending c.gather_info()'
+                    break
+
+    def add_info(self, e_sub, e_from, e_to, e_cc):
         """Collect the email info into a dictionary and count some stats"""
         if e_sub in self.info['email_sub']:
             self.info['email_sub'][e_sub] += 1
@@ -219,6 +250,16 @@ class pygmail:
         else:
             self.info['email_to'][e_to] = 1
 
+        if e_cc == None:
+            pass
+        else:
+            for email in e_cc:
+                if email in self.info['email_cc']:
+                    self.info['email_cc'][email] += 1
+                else:
+                    self.info['email_cc'][email] = 1
+            
+    '''
     def parse_emails(self):
         """Walk through emails within selected label."""
 
@@ -252,6 +293,7 @@ class pygmail:
                 if i > max_limit:
                     print 'Reached "max_limit". Ending c.parse_emails()'
                     break
+    '''
 
     def parse_starred_wankey(self):
         """Collect the authors of starred emails in wankey only"""
@@ -289,13 +331,13 @@ class pygmail:
                 for entry in self.info[field]:
                     print '\tEntry:', str(self.info[field][entry]).zfill(3), entry
         else:
-            print 'Dictionary is empty. Please run c.parse_emails() first'
+            print '\nDictionary is empty. Please run c.parse_emails() first'
 
     def dump_info(self):
         if self.info['email_sub'] != {}:
             f_out = open('./info.dat', 'w')
             cPickle.dump(self.info, f_out)
-            print '\n...Info dumped!'
+            print '\n...Info dictionary dumped! (./info.dat)'
 
 
 ####################
@@ -325,7 +367,10 @@ def ask_details():
             tmp = s.split(':', 1)
             file_email = tmp[0]
             file_password = tmp[1]
-            response = raw_input('Settings found for "' + file_email + '"\n\tReconnect?  (y/n):')
+            if autoreconn:
+                response = 'y'
+            else:
+                response = raw_input('Settings found for "' + file_email + '"\n\tReconnect?  (y/n):')
             while response != 'y' and response != 'n':
                 print 'r: "' + str(response) + '"'
                 response = raw_input('Please enter either "y" or "n":')
@@ -336,7 +381,6 @@ def ask_details():
                 print 'OK. Reconnecting to', file_email, '...\n'
                 run = False
     return file_email, file_password
-
 
 def remove_re(sub):
     """Tidy up the email subject.
@@ -362,6 +406,8 @@ def extract_email(line):
 def extract_emails(data):
     """Run multiple lines through extract_email().
         Return list of just emails."""
+    if data == None:
+        return None
     emails = []
     lines = []
     for line in str(data).split(','):
@@ -377,6 +423,14 @@ def get_percentage(now, total):
     int_total = float(total)
     pc = float(int_now / int_total * 100)
     return str(pc)[:4] + '%'
+
+def date_to_epoch(long_date):
+    """Convert email date to a timestamp for ease of storage.
+    eg: Thu, 21 Feb 2008 19:37:41 +0000
+    """
+    pattern = '%a, %j %b %Y %H:%M:S'
+    epoch = int(time.mktime(time.strptime(long_date[:-6], pattern)))
+    return epoch
 
 ####################
 #   Main:
@@ -408,7 +462,7 @@ if delve:
 
 #   Parse emails
 if look:
-    c.parse_emails()
+    c.gather_info()
 
 #   Display collected info
 if save:
