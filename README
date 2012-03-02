@@ -1,11 +1,11 @@
 // wankey-stats
 // A Wankey (and other Gmail thread) stats program (python)
 // Created: 2012/02/18
-// Modified: 2012/02/23
+// Modified: 2012/02/24
 
 
 // Intro:
-A program to answer once and for all the question: "How many wankeys are there?".
+A program to answer, once and for all, the question: "How many wankeys are there?".
 
 It will gather information about your Gmail email history and calculate some statistics as well as totals.
 Currently being developed on a broader scale (i.e. collecting stats on more than just the Wankey thread). This is with a view to be customisable to the spin-offs and your email usage in general.
@@ -20,6 +20,9 @@ Dave A/B, indivisible, MbS
 
 // Change log:
 
+ 2012/03/01 - 0.1.4:
+		Moved from string based modifications to regex.
+		Added charset decode to email subjects.
  2012/02/23 - 0.1.3:
 		First 'working' version. i.e. collects clean info.
 		Added separate Starred email stat collection.

@@ -6,54 +6,61 @@ Being written with the aim of answering that age old question:
     "How many 'Wankey's are there?"
 Will eventually collect stats and output a nice condensed summery of activity."""
 
-
 import imaplib
 import os
+import re
 import cPickle
 import time
-from types import *
+#from types import *
 from email.parser import HeaderParser
+from email.header import decode_header
+import cProfile
 
 #####################
-#   Customise run:
+##  Customise run: ##
 #####################
 
+test = False         # Used for testing specific functionality. Placed as needed.
 debug = False       # Set to display debug info.
 output = False      # Toggle printing output as it walks the chosen label.
-save = True         # Toggle building dict of repeating info.
+save = False         # Toggle building dict of repeating info.
+disp_labels = False # Toggle displaying of the label tree
 disp_count = False  # Toggle count of msgs on label list. (slower)
-ask_label = True    # Toggle asking for a label or default to one. (set below)
-delve = False       # Toggle displaying of label stats.
+ask_label = False    # Toggle asking for a label or default to one. (set below)
+delve = False       # Toggle displaying of chosen label stats.
 look = True         # Toggle parsing email stream for chosen label.
 info = True         # Toggle displaying dict info at end. ('save' must be "True" above)
-limit = False       # Toggle to enable stopping after a set amount of emails. (set below)
-autoreconn = True  # Reconnect to saved account info automatically (Still asks if none exists)
+limit = True       # Toggle to enable stopping after a set amount of emails. (set below)
+autoreconn = True   # Reconnect to saved account info automatically (Still asks if none exists)
 testcase = False     # Set to a message number or "False" for testing purposes
 
-max_limit = 15      # Set max emails to parse in a run. Limit for testing. (See limit above to toggle)
-default_label = '[Gmail]/Starred'   # Set your default label here "parent/child", case sensitive.
+max_limit = 5000      # Set max emails to parse in a run. Limit for testing. (See limit above to toggle)
+default_label = '[Gmail]/All Mail'   # Set your default label here "parent/child", case sensitive.
 # NB: If you want a system label (All, sent etc) use "[Gmail]/child" format incl. sq brackets '[]'
 
 #   Global vars:
 email = ''
 password = ''
+regex_sub = re.compile('\s*(re|fw|fwd)\s*:\s*', re.IGNORECASE)
+regex_email = re.compile('\<(.+?@.+?\.+?.+?)\>')
+regex_chars = re.compile('=\?(utf|iso|win)', re.IGNORECASE)
 
 ####################
-#   TODO:
+##   TODO:        ##
 ####################
 
-# - ask for email and password at runtime.                                  75%
-# - parse subjects in label and count unique threads (-Re: Re: Fw:)         50%
-# - display top thread counts (5+?)                                         0%
+# - ask for email and password at runtime.                                  100%
+# - parse subjects in label and count unique threads (-Re: Re: Fw:)         90%
+# - display only top thread counts (10+?)                                   0%
 # - parse ALL mail and gather thread counts (in case of lazy labels)        20%
-# - write a nav system for labels. with children, without, is parent etc    60%
+# - write a nav system for labels. with children, without, is parent etc    70%
 # - allow choosing multiple labels and multiple threads                     5%
 # - proper error handling                                                   0%
-# - forget whole email data and just get sub, to, from, cc, date etc.       0%
-
+# - move over to a sql db??                                                 0%
+# - ask_details() needs attention                                           5%
 
 ####################
-#   Classes:
+##   Classes:     ##
 ####################
 
 class pygmail:
@@ -80,6 +87,13 @@ class pygmail:
         self.info['email_cc'] = {}
         self.info['email_star'] = {}
         self.info['used_labels'] = []
+
+        self.get_sub = self.info['email_sub'].get
+        self.get_from = self.info['email_from'].get
+        self.get_to = self.info['email_to'].get
+        self.get_cc = self.info['email_cc'].get
+        self.get_star = self.info['email_star'].get
+        
 
     def login(self, username, password):
         """Create connection and login."""
@@ -208,13 +222,14 @@ class pygmail:
         self.M.select(self.label)
         rc, data = self.M.search(None, 'ALL')
         i = 1
-        if testcase:        # for debugging, set at top
+        if testcase:        # for debugging only: can choose a single email to test on. (set at top)
             print '\n-------- SINGLE TESTCASE:', testcase
             resp, header = self.M.FETCH(testcase, '(BODY[HEADER])')
             msg = HeaderParser().parsestr(header[0][1])
-            e_sub = remove_re(msg['Subject'])
-            e_from = extract_email(msg['From'])
-            e_to = extract_email(msg['To'])
+            e_sub = re_sub(msg['Subject'])
+            print msg['From'], '---'
+            e_from = extract_emails(msg['From'])
+            e_to = extract_emails(msg['To'])
             e_cc = extract_emails(msg['CC'])
             for key in msg.keys():
                 print key, ':\n', msg[key], '\n'
@@ -226,35 +241,37 @@ class pygmail:
                 print '\t', email
             #print 'Dte:', e_date
             print '\n'
-        else:
+        else:               # normal functionality - iterates over labels returned num list.
             total = self.get_count()
-            for uid in data[0].split():
-                percent_done = get_percentage(i, total)
-                print 'Grabbing', str(uid).zfill(len(total)), 'of', total, '\tComplete:', percent_done
-                resp, header = self.M.FETCH(uid, '(BODY[HEADER])')
+            for num in data[0].split():
+                #percent_done = get_percentage(i, total)
+                print 'Grabbing', str(num).zfill(len(total)), 'of', total#, '\tComplete:', percent_done
+                resp, header = self.M.FETCH(num, '(BODY[HEADER])')
                 if debug: print 'header_data:\n', header
                 msg = HeaderParser().parsestr(header[0][1])
-                e_sub = remove_re(msg['Subject'])
-                e_from = extract_email(msg['From'])
-                e_to = extract_email(msg['To'])
+                e_sub = re_sub(msg['Subject'])
+                e_from = extract_emails(msg['From'])
+                e_to = extract_emails(msg['To'])
                 e_cc = extract_emails(msg['CC'])
-                #e_cc = extract_emails(msg['CC']
                 #e_date = date_to_epoch(msg['Date'])
                 self.add_info_norm(e_sub, e_from, e_to, e_cc)
                 if debug:
-                    print 'Sub:', e_sub
-                    print 'Frm:', e_from
-                    print 'To: ', e_to
-                    print 'CC: ', e_cc
-                    #print 'Dte:', e_date
+                    print 'Sub: ', e_sub
+                    print 'Frm: ', e_from
+                    print 'To:  ', e_to
+                    print 'CC: '
+                    for email in e_cc:
+                        print '\t', email
+                    #print 'Date:', e_date
                     print '\n'
                 i += 1
                 if limit:
                     if i > max_limit:
-                        print 'Reached "max_limit". Ending c.gather_info()\n'
+                        print '\nReached "max_limit" of', max_limit, '- Ending c.gather_info()\n'
                         break
 
     def gather_starred(self, wankey=True):
+        # Unused so far
         self.M.select('[Gmail]/Starred')
         rc, data = self.M.search(None, 'ALL')
         i = 1
@@ -264,47 +281,42 @@ class pygmail:
             resp, header = self.M.FETCH(uid, '(BODY[HEADER])')
             msg = HeaderParser().parsestr(header[0][1])
             e_sub = remove_re(msg['Subject'])
-            e_from = extract_email(msg['From'])
-            e_to = extract_email(msg['To'])
-            e_cc = extract_emails(msg['CC'])
+            e_from = extract_to(msg['From'])
+            e_to = extract_to(msg['To'])
+            e_cc = extract_cc(msg['CC'])
 
     def add_info_norm(self, e_sub, e_from, e_to, e_cc):
         """Collect the email info into a dictionary and count some stats"""
-        if e_sub in self.info['email_sub']:
-            self.info['email_sub'][e_sub] += 1
+        # Subject:
+        if e_sub not in self.info['email_sub']:
+            self.info['email_sub'][e_sub] = 0
+        self.info['email_sub'][e_sub] += 1
+        # From:
+        use = e_from[0].lower()
+        if use not in self.info['email_from']:
+            self.info['email_from'][use] = 0
+        self.info['email_from'][use] += 1
+        # To:
+        if e_to == None:
+            pass
         else:
-            self.info['email_sub'][e_sub] = 1
-
-        if e_from in self.info['email_from']:
-            self.info['email_from'][e_from] += 1
-        else:
-            self.info['email_from'][e_from] = 1
-
-        if e_to in self.info['email_to']:
-            self.info['email_to'][e_to] += 1
-        else:
-            self.info['email_to'][e_to] = 1
-
+            for email in e_to:
+                if email not in self.info['email_to']:
+                    self.info['email_to'][email] = 0
+                self.info['email_to'][email] += 1
+        # CC:
         if e_cc == None:
             pass
         else:
             for email in e_cc:
-                if email in self.info['email_cc']:
-                    self.info['email_cc'][email] += 1
-                else: self.info['email_cc'][email] = 1
+                use = email.lower()
+                if use not in self.info['email_cc']:
+                    self.info['email_cc'][use] = 0
+                self.info['email_cc'][use] += 1
 
-    def add_info_starred(self, e_sub, e_from, e_to, e_cc):
-        # untested, may need to declare sub dicts at top.
-        """Collect the starred info into a dictionary and count some stats"""
-        if e_sub in self.info['email_star']['email_sub']:
-            self.info['email_star']['email_sub'][e_sub] += 1
-        else: self.info['email_star']['email_sub'][e_sub] = 1
-        if e_from in self.info['email_star']['email_from']:
-            self.info['email_star']['email_from'][e_from] += 1
-        else: self.info['email_star']['email_from'][e_from] = 1
-        if e_to in self.info['email_star']['email_to']:
-            self.info['email_star']['email_to'][e_to] += 1
-        else: self.info['email_star']['email_to'][e_to] = 1
+    def add_info_starred():
+        ## TODO
+        pass
 
     def disp_info(self):
         """Print out the contents of the info dictionary"""
@@ -312,10 +324,10 @@ class pygmail:
             for field in self.info:
                 print 'Field:', field
                 if field == 'used_labels':
-                    print 'Skipping used_labels [list]'
+                    print '\tSkipping used_labels [list]'
                     continue
                 for entry in self.info[field]:
-                    print '\tEntry:', str(self.info[field][entry]).zfill(3), entry.strip()
+                    print '\tEntry:', str(self.info[field][entry]).zfill(3), str(entry).strip()
         else:
             print '\nDictionary is empty. Please run c.parse_emails() first'
 
@@ -327,7 +339,7 @@ class pygmail:
 
 
 ####################
-#   Functions:
+##   Functions:   ##
 ####################
 
 def ask_details():
@@ -336,10 +348,8 @@ def ask_details():
     run = True
     while run:
         try:
-            os.stat(location)
+            os.stat(location)       # Test is file exists
         except:
-            #run = True
-            #while run:
             file_email = raw_input('Please enter your full email address:\t')
             file_password = raw_input('Please enter your email password:\t')
             f_out = open(location, 'w')
@@ -350,6 +360,7 @@ def ask_details():
             f_in = open(location)
             s = f_in.read()
             f_in.close()
+            ### TODO: Make a try...except...else for file exists but unusable/empty.
             tmp = s.split(':', 1)
             file_email = tmp[0]
             file_password = tmp[1]
@@ -368,52 +379,48 @@ def ask_details():
                 run = False
     return file_email, file_password
 
-def remove_re(sub):
-    """Tidy up the email subject.
-    TODO: include 'Fw:' to find
-    TODO: make all this a while loop"""
-    if sub.rfind('Re:') != -1:
-        tmp = sub[sub.rfind('Re:')+3:].strip()
-        while tmp.startswith('Re :'):
-            tmp = tmp[4:].strip()
-        return tmp
+def re_sub(subject):
+    """Tidy up email subjects for comparisson using regex."""
+    if subject == None:
+        return 'No subject'
+    if regex_chars.search(subject):
+        tmp = 'foo: ' + subject
+        print tmp
+        title, value = decode_header(tmp)
+        return regex_sub.sub('', value[0].strip())
     else:
-        return sub
+        return regex_sub.sub('', subject.strip())
 
-def extract_email(line):
-    """Remove extranious info from a string, return just the email."""
+def extract_to(line):
+    # DEPRECIATED
+    """Extract a single email from a string"""
     try:
-        line.index('<')
+        found = regex_email.search(line)
+        return found.group(1).lower()
     except:
         return str(line).lower().strip()
-    else:
-        return str(line[line.rfind('<')+1:line.rfind('>')]).lower().strip()
+
+def extract_cc(data):
+    # DEPRECIATED
+    """Take the email addresses from cc data"""
+    return regex_email.findall(str(data))
 
 def extract_emails(data):
-    """Run multiple lines through extract_email().
-        Return list of just emails."""
+    """Take the email addresses from cc data"""
     if data == None:
-        return None
-    emails = []
-    lines = []
-    for line in str(data).split(','):
-        try:    # ensure only lines w/emails make it through. Commas in names were breaking it - s.split(',')
-            line.index('@')
-        except:
-            continue
+        return 'None'
+    else:
+        found = regex_email.search(data)
+        if found == None:
+            return str(data).lower().strip()
         else:
-            lines.append(line)
-    for line in lines:
-        tmp = extract_email(line)
-        if not emails.__contains__(tmp):
-            emails.append(extract_email(line))
-    return emails
+            return regex_email.findall(str(data))
 
 def get_percentage(now, total):
-    int_now = float(now)
-    int_total = float(total)
-    pc = float(int_now / int_total * 100)
-    return str(pc)[:4] + '%'
+    """Calculate percentage to 3 figures (excl decimal pt) and return as a string (w/% appended).
+
+    get_percentage(now, total)"""
+    return str(float(float(now) / float(total) * 100))[:4] + '%'
 
 def date_to_epoch(long_date):
     """Convert email date to a timestamp for ease of storage.
@@ -424,48 +431,63 @@ def date_to_epoch(long_date):
     return epoch
 
 ####################
-#   Main:
+##   Main:        ##
 ####################
 
-#   Ask user for account details if not saved in file
-email, password = ask_details()
+if __name__ == '__main__':
+    #   Note time for total run at end
+    t1 = time.time()
+    
+    #   Ask user for account details if not saved in file
+    email, password = ask_details()
 
-#   Initialise class and logon
-c = pygmail()
-c.login(email, password)
+    #   Initialise class and logon
+    c = pygmail()
+    c.login(email, password)
 
-#   Gather labels then print them out with index
-c.get_all_labels()
-c.disp_all_labels()
+    #   Gather labels then print them out if desired
+    c.get_all_labels()
+    if disp_labels:
+        c.disp_all_labels()
+    else:
+        print '\nSkipping label display...\n'
 
-#   Ask for a label
-if ask_label:
-    c.select_label()
-else:
-    c.label = default_label
+    #   Ask for a label or use default
+    if ask_label:
+        c.select_label()
+    else:
+        c.label = default_label
 
-#   Look into a label (readonly)
-if delve:
-    c.disp_full_info()
+    #   Look into a label (readonly)
+    if delve:
+        c.disp_full_info()
 
-#   Parse emails
-if look:
-    c.gather_info()
+    #   Parse emails and collect info (subject, to, from, cc)
+    if look:
+        c.gather_info()
 
-#   Display collected info
-if info:
-    c.disp_info()
-    if save:
-        c.dump_info()
+    #   Display collected info if saved and desired
+    if info:
+        c.disp_info()
+        if save:
+            c.dump_info()
 
-#   Logout
-c.logout()
+    #   Logout
+    c.logout()
 
+    #   Calc and print run time
+    t2 = time.time()
+    done = str(t2 - t1)
+    print 'Total run time was', done[:done.find('.')+3], 'seconds.'
+
+####################
+##   Details:     ##
+####################
 
 __author__      = "Dave A, aka indivisible, aka mbs-irl"
-__email__       = "mbspare@gmail.com"
+__email__       = "mbspare (at) gmail (dot) com"
 __copyright__   = "Copyright 2012, indivisible"
-__license__     = "GPL"
-__version__     = "0.1.3"
-__date__        = "23/02/2012"
+__license__     = "GPL, no warrenties or guarantees"
+__version__     = "0.1.4"
+__date__        = "01/03/2012"
 __status__      = "Alpha"
